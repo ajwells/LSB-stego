@@ -33,10 +33,10 @@ public class Stego {
 
 			int width = img.getWidth();
 			int height = img.getHeight();
-			int max_size = width * height;
-			
-			//String to_encrypt_string = "This is a test that is even longer so hopefully StegExpose will at least detect some kind of change in the file so we can start testing different forms of encrypting this shit into the images since right not it is a very basic task, we are just making the whole blue value the byte to encrypt... not a very good way of going about this tbh, but we need to be able to detect there is some change going on!";
-			//byte[] to_encrypt_bytes = to_encrypt_string.getBytes(Charset.forName("UTF-8"));
+			int max_size = width * height - 4;
+
+			System.out.println("Image width: " + width);
+			System.out.println("Image height: " + height);
 			
 			byte[] to_encrypt_bytes = null;
 			try {
@@ -48,10 +48,57 @@ public class Stego {
 			}
 
 			int encrypt_length = to_encrypt_bytes.length;
-			int cur_byte = 0;
+			System.out.println("Encryption length: " + encrypt_length);
+			if (encrypt_length >= 2147483647) {
+				System.out.println("Stego: encryption data is too large"); 
+				System.exit(1);	
+			}
+			if (encrypt_length >= max_size) {
+				System.out.println("Stego: encryption data is too large for selected image"); 
+				System.exit(1);	
+			}
 			
+			byte[] encrypt_length_bytes = ByteBuffer.allocate(4).putInt(encrypt_length).array();
+			int cur_byte = 0;
+			// First 4 pixels contain length of message
 			for (int y = 0; y < height; y++) {
 				for (int x = 0; x < width; x++) {
+					if (cur_byte < 4) {
+						int rgb_int = img.getRGB(x, y);
+						Color color = new Color(rgb_int, true);
+						byte cur_encrypt_byte = encrypt_length_bytes[cur_byte];
+						// first two bits in RED
+						int red = color.getRed();
+						int new_red = ((cur_encrypt_byte >>> 6) & 0x03) | 0xfc;
+						red = (red | 0x03) & new_red;
+						// second two bits in GREEN
+						int green = color.getGreen();
+						int new_green = (cur_encrypt_byte >>> 4) & 0x03 | 0xfc;
+						green = (green | 0x03) & new_green;
+						// third two bits in BLUE
+						int blue = color.getBlue();
+						int new_blue = (cur_encrypt_byte >>> 2) & 0x03 | 0xfc;
+						blue = (blue | 0x03) & new_blue;
+						// last two bits in ALPHA
+						int alpha = color.getAlpha();
+						int new_alpha = cur_encrypt_byte & 0x03 | 0xfc;
+						alpha = (alpha | 0x03) & new_alpha;
+						// make new color
+						Color new_col = new Color(red, green, blue, alpha);
+						img.setRGB(x, y, new_col.getRGB());
+						cur_byte++;
+					} else {
+						break;
+					}
+				}
+				if (cur_byte >= 4) {
+					break;
+				}
+			}
+			
+			cur_byte = 0;
+			for (int y = 4; y < height; y++) {
+				for (int x = 4; x < width; x++) {
 					if (cur_byte < encrypt_length) {
 						int rgb_int = img.getRGB(x, y);
 						Color color = new Color(rgb_int, true);
@@ -76,7 +123,12 @@ public class Stego {
 						Color new_col = new Color(red, green, blue, alpha);
 						img.setRGB(x, y, new_col.getRGB());
 						cur_byte++;
+					} else {
+						break;
 					}
+				}
+				if (cur_byte >= encrypt_length) {
+					break;
 				}
 			}
 
@@ -86,6 +138,7 @@ public class Stego {
 			} catch (IOException e) {
 				System.out.println("Stego: could not save file " + outputFile);
 			}
+			System.out.println("Success");
 
 		}
 		
@@ -102,12 +155,46 @@ public class Stego {
 
 			int width = img.getWidth();
 			int height = img.getHeight();
+			
+			byte[] length_bytes = new byte[4];
 			int cur_byte = 0;
-			int encrypt_length = 800;
-			byte[] decrypted_bytes = new byte[encrypt_length];
-
+			// First 4 pixels contain length of message
 			for (int y = 0; y < height; y++) {
 				for (int x = 0; x < width; x++) {
+					if (cur_byte < 4) {
+						int rgb_int = img.getRGB(x, y);
+						Color color = new Color(rgb_int, true);
+						byte encrypted_info = 0x0;
+						// first two bits in RED
+						int red = color.getRed();
+						encrypted_info = (byte) (encrypted_info | (red & 0x03) << 6);
+						// second two bits in GREEN
+						int green = color.getGreen();
+						encrypted_info = (byte) (encrypted_info | ((green & 0x03) << 4));
+						// third two bits in BLUE
+						int blue = color.getBlue();
+						encrypted_info = (byte) (encrypted_info | ((blue & 0x03) << 2));
+						// last two bits in ALPHA
+						int alpha = color.getAlpha();
+						encrypted_info = (byte) (encrypted_info | (alpha & 0x03));
+						// add byte
+						length_bytes[cur_byte] = encrypted_info;
+						cur_byte++;
+					} else {
+						break;
+					}
+				}
+				if (cur_byte >= 4) {
+					break;
+				}
+			}
+		
+			int encrypt_length = ByteBuffer.wrap(length_bytes).getInt();
+			
+			byte[] decrypted_bytes = new byte[encrypt_length];
+			cur_byte = 0;
+			for (int y = 4; y < height; y++) {
+				for (int x = 4; x < width; x++) {
 					if (cur_byte < encrypt_length) {
 						int rgb_int = img.getRGB(x, y);
 						Color color = new Color(rgb_int, true);
@@ -127,7 +214,12 @@ public class Stego {
 						// add byte
 						decrypted_bytes[cur_byte] = encrypted_info;
 						cur_byte++;
+					} else {
+						break;
 					}
+				}
+				if (cur_byte >= encrypt_length) {
+					break;
 				}
 			}
 
@@ -139,8 +231,10 @@ public class Stego {
 				decrypted_output.close();
 			} catch (UnsupportedEncodingException e) {
 				System.out.println("Stego: could not decoded bytes");
+				System.exit(1);
 			} catch (IOException e) {
 				System.out.println("Stego: could not save file " + args[2]);
+				System.exit(1);
 			}
 
 		}
