@@ -37,6 +37,7 @@ public class Stego {
 
 			System.out.println("Image width: " + width);
 			System.out.println("Image height: " + height);
+			System.out.println("Max encryption length: " + max_size);
 			
 			byte[] to_encrypt_bytes = null;
 			try {

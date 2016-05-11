@@ -1,3 +1,5 @@
 *.class
 *.png
 decrypt
+testing/*
+output*
